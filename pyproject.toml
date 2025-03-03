@@ -1,0 +1,16 @@
+[project]
+name = "infinity"
+version = "0.1.0"
+description = "SDK for creating Hugging Face Inference Endpoints deployments"
+readme = "README.md"
+authors = [
+    { name = "Morgan Funtowicz", email = "morgan@hf.co" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "packaging>=24.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
