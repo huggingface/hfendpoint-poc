@@ -1,9 +1,12 @@
-from abc import ABC, abstractmethod
+from typing import Protocol
 
-from infinity import Engine
+from infinity.core import Engine, Handler
 
-class Endpoint(ABC):
-    @abstractmethod
+class Endpoint(Protocol):
     @property
     def engine(self) -> Engine:
-        raise NotImplementedError("Endpoint::engine is abstract")
+        ...
+
+    @property
+    def handler(self) -> Handler:
+        ...

@@ -44,7 +44,7 @@ router = APIRouter()
 
 @router.post("/v1/audio/transcriptions")
 async def transcription(
-        service: Annotated[Endpoint, Depends(Endpoint)],
+        # service: Annotated[Endpoint, Depends(Endpoint)],
         file: Annotated[bytes, File()],
         model: Optional[str] = None,
         language: Optional[str] = "en",
@@ -54,7 +54,7 @@ async def transcription(
     tracer =  trace.get_tracer("huggingface.endpoints.audio")
     with tracer.start_as_current_span("transcriptions"):
 
-        engine: VllmEngine = service.engine
+        # engine: VllmEngine = service.engine
 
         # Unmarshall the audio content
         with tracer.start_as_current_span("audio"):
@@ -83,6 +83,7 @@ router.openapi = openapi_transcriptions
 
 
 class TranscriptionHandler(Handler, ABC):
+    @property
     def router(self):
         return router
 

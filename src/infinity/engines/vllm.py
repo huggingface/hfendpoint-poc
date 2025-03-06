@@ -1,16 +1,15 @@
 from abc import ABC
 from typing import Any, Dict, Optional, Union
 
+from infinity import Engine
 from vllm.v1.engine.llm_engine import EngineArgs, LLMEngine
 from vllm.usage.usage_lib import UsageContext
-
-from infinity.core import Handler
 
 
 INFINITY_VLLM_USAGE_CONTEXT = "hf.endpoints.vllm"
 
 
-class VllmEngine(Handler, ABC):
+class VllmEngine(Engine, ABC):
 
     __slots__ = ("_engine", )
 

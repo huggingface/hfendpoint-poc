@@ -1,8 +1,7 @@
-from abc import ABC, abstractmethod
+from typing import Protocol
 
 
-class Handler(ABC):
-    @abstractmethod
+class Handler(Protocol):
     @property
     def router(self):
-        raise NotImplementedError("Handler::router is abstract")
+        ...
