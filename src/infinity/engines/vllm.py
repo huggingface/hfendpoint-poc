@@ -1,6 +1,6 @@
 from abc import ABC
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, TypedDict, Union
+from typing import TypedDict, Union
 
 from infinity import Engine
 from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams, TextPrompt, TokensPrompt
@@ -35,7 +35,7 @@ class VllmEngine(Engine[VllmGenerateParams], ABC):
         async for step in self._engine.generate(**asdict(params)):
             # Handle cancellation
             pass
-        
+
         return step
 
 
