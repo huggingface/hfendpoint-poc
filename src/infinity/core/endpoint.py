@@ -1,10 +1,16 @@
-from typing import Protocol
+from typing import Generic, Protocol, TypeVar, runtime_checkable
 
 from infinity.core import Engine, Handler
 
-class Endpoint(Protocol):
-    @property
-    def engine(self) -> Engine:
+
+I = TypeVar("I")
+O = TypeVar("O")
+
+
+@runtime_checkable
+class Endpoint(Generic[I, O], Protocol):
+
+    def on_request(self, request: I) -> O:
         ...
 
     @property
