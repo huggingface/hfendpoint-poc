@@ -1,5 +1,7 @@
 from typing import Generic, Protocol, TypeVar, runtime_checkable
 
+from opentelemetry.trace import Tracer
+
 from infinity.core import Engine, Handler
 
 
@@ -10,7 +12,7 @@ O = TypeVar("O")
 @runtime_checkable
 class Endpoint(Generic[I, O], Protocol):
 
-    def on_request(self, request: I) -> O:
+    def __call__(self, request: I, tracer: Tracer) -> O:
         ...
 
     @property
