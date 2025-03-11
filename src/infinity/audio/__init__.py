@@ -12,4 +12,9 @@ def chunk_audio_with_duration(audio: np.ndarray, maximum_duration_sec: int, samp
     :param sampling_rate: The number of samples to represent one second of audio
     :return: List of numpy array representing the chunk
     """
-    return np.array_split(audio, (len(audio) // (sampling_rate * maximum_duration_sec)) + 1)
+
+    # We pad the input so that every chunk length is `max_duration_sec`
+    max_duration_samples = sampling_rate * maximum_duration_sec
+    padding = max_duration_samples - np.remainder(len(audio), max_duration_samples)
+    audio = np.pad(audio, (0, padding), constant_values=0.0)
+    return np.split(audio, len(audio) // max_duration_samples)
