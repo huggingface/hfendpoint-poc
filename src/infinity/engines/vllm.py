@@ -2,8 +2,10 @@ from abc import ABC
 from dataclasses import asdict, dataclass
 from typing import TypedDict, Union, Any
 
+from typing_extensions import AsyncGenerator
+
 from infinity import Engine
-from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams, TextPrompt, TokensPrompt
+from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams, TextPrompt, TokensPrompt, RequestOutput
 from vllm.usage.usage_lib import UsageContext
 
 
@@ -31,12 +33,12 @@ class VllmEngine(Engine[VllmGenerateParams], ABC):
 
         self._engine = engine
 
-    async def schedule(self, params: VllmGenerateParams):
+    async def schedule(self, params: VllmGenerateParams) -> AsyncGenerator[RequestOutput]:
         async for step in self._engine.generate(**asdict(params)):
-            # Handle cancellation
-            print(f"intermediate step: {step}")
-        return step
+            yield step
 
+    async def cancel(self, request_id: Any):
+        await self._engine.abort(request_id)
 
 
 

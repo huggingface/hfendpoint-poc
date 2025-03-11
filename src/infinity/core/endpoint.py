@@ -1,5 +1,6 @@
 from typing import Generic, Protocol, TypeVar, runtime_checkable
 
+from anyio import CancelScope
 from opentelemetry.trace import Tracer
 
 from infinity.core import Engine, Handler
@@ -12,7 +13,7 @@ O = TypeVar("O")
 @runtime_checkable
 class Endpoint(Generic[I, O], Protocol):
 
-    def __call__(self, request: I, tracer: Tracer) -> O:
+    def __call__(self, request: I, tracer: Tracer, is_cancelled: CancelScope) -> O:
         ...
 
     @property

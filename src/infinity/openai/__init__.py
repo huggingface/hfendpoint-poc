@@ -1,5 +1,9 @@
+from contextlib import asynccontextmanager
 from typing import Any
 from weakref import WeakValueDictionary
+
+from anyio import CancelScope, create_task_group
+from fastapi import Request
 
 
 __services__ = WeakValueDictionary()
@@ -19,3 +23,20 @@ def delete_service(name: str):
 def get_service(name: str) -> Any:
     return __services__[name]
 
+
+async def disconnection_handler(request: Request, has_disconnect: CancelScope):
+    while True:
+        message = await request.receive()
+        if message["type"] == "http.disconnect":
+            break
+
+    print("disconnection_handler::cancel()")
+    has_disconnect.cancel()
+
+
+@asynccontextmanager
+async def scoped_cancellation_handler(request: Request) -> CancelScope:
+    async with create_task_group() as group:
+        group.start_soon(disconnection_handler, request, group.cancel_scope)
+        yield group.cancel_scope
+        group.cancel_scope.cancel()

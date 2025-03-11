@@ -1,18 +1,15 @@
-import weakref
 from abc import ABC
 from dataclasses import dataclass
 from enum import Enum
 
-from fastapi.exceptions import RequestValidationError
 from opentelemetry import trace
-from typing import Annotated, List, Union
+from typing import Annotated, List, Union, Optional
 
-from fastapi import APIRouter, Depends, File, Response, status, HTTPException
+from fastapi import APIRouter, Depends, File, Response, Request, HTTPException
 from fastapi.openapi.utils import get_openapi
 
 from infinity import Handler
-from infinity.openai import get_service, register_service
-
+from infinity.openai import get_service, register_service, scoped_cancellation_handler
 
 ENDPOINT_NAME = "endpoint"
 
@@ -126,21 +123,26 @@ router = APIRouter()
 
 @router.post("/v1/audio/transcriptions")
 async def transcription(
-    request: Annotated[Depends(TranscriptionRequest), Depends(TranscriptionRequest)],
+    params: Annotated[Depends(TranscriptionRequest), Depends(TranscriptionRequest)],
+    request: Request,
     response: Response
-) -> Union[Transcription, VerboseTranscription]:
-    tracer = trace.get_tracer("huggingface.endpoints.audio.transcriptions")
+) -> Optional[Union[Transcription, VerboseTranscription]]:
+        tracer = trace.get_tracer("huggingface.endpoints.audio.transcriptions")
 
-    if request.language not in ISO639_1_SUPPORTED_LANGS:
-        raise HTTPException(400, f"{request.language} is not a valid ISO-639-1 language format.")
+        if params.language not in ISO639_1_SUPPORTED_LANGS:
+            raise HTTPException(400, f"{params.language} is not a valid ISO-639-1 language format.")
 
-    with tracer.start_as_current_span("on_request") as span:
-        try:
-            service = get_service(ENDPOINT_NAME)
-            return await service(request, tracer)
-        except Exception as e:
-            span.add_event(e)
-            raise e
+        with tracer.start_as_current_span("on_request") as span:
+            try:
+                service = get_service(ENDPOINT_NAME)
+
+                async with scoped_cancellation_handler(request) as has_disconnected:
+                    result = await service(params, tracer, has_disconnected)
+
+                    return result
+            except Exception as e:
+                span.add_event(e)
+                raise e
 
 
 def openapi_transcriptions():
@@ -164,7 +166,6 @@ class TranscriptionHandler(Handler, ABC):
 
     INPUT_TYPE = TranscriptionRequest
     OUTPUT_TYPE = Union[Transcription, VerboseTranscription]
-
 
     def __init__(self, endpoint: "Endpoint"):
         register_service(ENDPOINT_NAME, endpoint)  # Register will make a weakref to $endpoint
