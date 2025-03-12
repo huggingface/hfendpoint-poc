@@ -1,12 +1,14 @@
 from abc import ABC
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from enum import Enum
 
+from fastapi.responses import JSONResponse
 from opentelemetry import trace
-from typing import Annotated, List, Union, Optional
+from typing import Annotated, List, Union
 
-from fastapi import APIRouter, Depends, File, Response, Request, HTTPException
+from fastapi import APIRouter, File, Form, Response, Request, HTTPException
 from fastapi.openapi.utils import get_openapi
+from pydantic import BaseModel
 
 from infinity import Handler
 from infinity.openai import get_service, register_service, scoped_cancellation_handler
@@ -81,8 +83,7 @@ class Word:
     end: int
 
 
-@dataclass
-class Transcription:
+class Transcription(BaseModel):
     """
     Represents a transcription response returned by model, based on the provided input.
     """
@@ -90,7 +91,6 @@ class Transcription:
     text: str
 
 
-@dataclass
 class VerboseTranscription(Transcription):
     """
     Represents a transcription response returned by model, based on the provided input.
@@ -101,7 +101,7 @@ class VerboseTranscription(Transcription):
     word: List[Word]
 
 
-class TranscriptionResponseFormat(Enum):
+class ResponseFormat(str, Enum):
     JSON = "json"
     SRT = "srt"
     TEXT = "text"
@@ -109,24 +109,23 @@ class TranscriptionResponseFormat(Enum):
     VTT = "vtt"
 
 
-@dataclass
-class TranscriptionRequest:
+
+class ApiRequest(BaseModel):
     file: Annotated[bytes, File()]
     model: str | None = None
     language: str = "en"
     prompt: str | None = None
     temperature: float = 0.0
-    response_format: TranscriptionResponseFormat = TranscriptionResponseFormat.JSON
+    response_format: ResponseFormat = ResponseFormat.JSON
 
 router = APIRouter()
 
 
-@router.post("/v1/audio/transcriptions")
+@router.post("/v1/audio/transcriptions", response_model=Union[Transcription, VerboseTranscription])
 async def transcription(
-    params: Annotated[Depends(TranscriptionRequest), Depends(TranscriptionRequest)],
+    params: Annotated[ApiRequest, Form()],
     request: Request,
-    response: Response
-) -> Optional[Union[Transcription, VerboseTranscription]]:
+) -> Response:
         tracer = trace.get_tracer("huggingface.endpoints.audio.transcriptions")
 
         if params.language not in ISO639_1_SUPPORTED_LANGS:
@@ -137,9 +136,10 @@ async def transcription(
                 service = get_service(ENDPOINT_NAME)
 
                 async with scoped_cancellation_handler(request) as has_disconnected:
-                    result = await service(params, tracer, has_disconnected)
+                    # TODO: Better handle failure in response - Rust's Result<T, E> ?
+                    result: Union[Transcription, VerboseTranscription] = await service(params, tracer, has_disconnected)
+                    return JSONResponse(result.model_dump())
 
-                    return result
             except Exception as e:
                 span.add_event(e)
                 raise e
@@ -164,7 +164,7 @@ router.openapi = openapi_transcriptions
 
 class TranscriptionHandler(Handler, ABC):
 
-    INPUT_TYPE = TranscriptionRequest
+    INPUT_TYPE = ApiRequest
     OUTPUT_TYPE = Union[Transcription, VerboseTranscription]
 
     def __init__(self, endpoint: "Endpoint"):

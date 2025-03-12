@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "asgi-correlation-id>=4.3.4",
     "opentelemetry-api>=1.30.0",
     "opentelemetry-sdk>=1.30.0",
     "packaging>=24.2",
@@ -16,6 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 openai = [
     "fastapi>=0.115.11",
+    "pydantic>=2.10.0",
     "python-multipart>=0.0.20",
 ]
 audio = [
