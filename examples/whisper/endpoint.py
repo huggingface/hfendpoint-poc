@@ -35,8 +35,10 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
         self._engine = VllmEngine(AsyncEngineArgs(
             model,
             device="auto",
-            enforce_eager=True,
+            enforce_eager=False,
+            dtype="bfloat16",
             kv_cache_dtype="fp8",
+            enable_prefix_caching=True,
         ))
 
         self._handler = TranscriptionHandler(self)
@@ -128,4 +130,4 @@ async def endpoint(app: FastAPI) -> WhisperEndpoint:
 
 # Allocate HTTP server
 app = FastAPI(lifespan=endpoint)
-# app.add_middleware(CorrelationIdMiddleware)
+app.add_middleware(CorrelationIdMiddleware)
