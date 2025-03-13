@@ -14,10 +14,10 @@ from transformers import PreTrainedTokenizer
 from vllm import SamplingParams, RequestOutput, CompletionOutput
 from vllm.sampling_params import RequestOutputKind
 
-from infinity import Endpoint
-from infinity.audio import chunk_audio_with_duration
-from infinity.engines.vllm import VllmEngine, VllmGenerateParams
-from infinity.openai.audio.transcriptions import ApiRequest, ResponseFormat, TranscriptionHandler, Transcription, \
+from hfendpoint import Endpoint
+from hfendpoint.audio import chunk_audio_with_duration
+from hfendpoint.engines.vllm import VllmEngine, VllmGenerateParams
+from hfendpoint.openai.audio.transcriptions import ApiRequest, ResponseFormat, TranscriptionHandler, Transcription, \
     VerboseTranscription
 from librosa import load as load_audio_content
 from vllm.engine.async_llm_engine import AsyncEngineArgs

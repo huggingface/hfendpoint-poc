@@ -1,5 +1,5 @@
 [project]
-name = "infinity"
+name = "hfendpoint"
 version = "0.1.0"
 description = "SDK for creating Hugging Face Inference Endpoints deployments"
 readme = "README.md"

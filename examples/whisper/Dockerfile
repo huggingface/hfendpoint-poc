@@ -1,15 +1,15 @@
 FROM vllm/vllm-openai
 
-# Copy current infinity folder for now
-COPY . /opt/infinity
+# Copy current hfendpoint folder for now
+COPY . /opt/hfendpoint
 
 WORKDIR /opt
-RUN cd /opt/infinity &&  \
+RUN cd /opt/hfendpoint &&  \
     python3 -m pip install .[openai,vllm,audio] && \
     python3 -m pip install -r examples/whisper/requirements.txt
 
 
-WORKDIR /opt/infinity/examples/whisper
+WORKDIR /opt/hfendpoint/examples/whisper
 
 ENV GRANIAN_TASK_IMPL=asyncio
 ENV GRANIAN_WORKERS=1
