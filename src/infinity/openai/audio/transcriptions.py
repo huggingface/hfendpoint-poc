@@ -7,6 +7,7 @@ from opentelemetry import trace
 from typing import Annotated, List, Union
 
 from fastapi import APIRouter, File, Form, Response, Request, HTTPException
+from fastapi.responses import PlainTextResponse
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
 
@@ -143,6 +144,11 @@ async def transcription(
             except Exception as e:
                 span.add_event(e)
                 raise e
+
+
+@router.get("/health")
+async def health() -> PlainTextResponse:
+    return PlainTextResponse("Ok")
 
 
 def openapi_transcriptions():
