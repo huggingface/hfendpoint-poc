@@ -1,10 +1,10 @@
 import asyncio
 from contextlib import asynccontextmanager
 from io import BytesIO
-from itertools import chain
 from os import PathLike
-from typing import Union, List, TypedDict
+from typing import Union, List, TypedDict, Tuple
 
+import librosa
 import numpy as np
 from anyio import CancelScope
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
@@ -18,7 +18,7 @@ from hfendpoint import Endpoint
 from hfendpoint.audio import chunk_audio_with_duration
 from hfendpoint.engines.vllm import VllmEngine, VllmGenerateParams
 from hfendpoint.openai.audio.transcriptions import ApiRequest, ResponseFormat, TranscriptionHandler, Transcription, \
-    VerboseTranscription
+    VerboseTranscription, Segment
 from librosa import load as load_audio_content
 from vllm.engine.async_llm_engine import AsyncEngineArgs
 
@@ -64,32 +64,76 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
                     "audio": (audio, sampling_rate)
                 }
             },
-            "decoder_prompt": f"<|startoftranscript|><|{request.language}|><|transcribe|>{timestamp_marker}"
+            # "decoder_prompt": f"<|startoftranscript|><|{request.language}|><|transcribe|>{timestamp_marker}"
+            "decoder_prompt": {
+                "prompt_token_ids": [50258, 50259, 50360, 50365]
+            }
         }
 
-    async def _postprocess(self, segments: List[RequestOutput]):
-        tokenizer = await self._engine._engine.get_tokenizer()
+    def _postprocess(self, tokenizer: PreTrainedTokenizer, segments: List[RequestOutput], request: ApiRequest) -> Tuple[List[Segment], str]:
         timestamp_token_base = tokenizer.convert_tokens_to_ids("<|0.00|>")
+        materialized_segments, materialized_segments_tokens_acc = [], []
 
+        # Iterate over segments
+        segment_timestamp_start = 0.0
         for (idx, segment) in enumerate(segments):
             generation: CompletionOutput = segment.outputs[-1]
             ids: np.ndarray = np.asarray(generation.token_ids)
-
-            print(f"{idx} -> {ids}")
 
             # Timestamps are expected to have ids greater than token_id(<|0.00|>)
             # We create a mask for all the potential tokens which are >= token_id(<|0.00|>)
             timestamps_mask = ids >= timestamp_token_base
 
             if np.any(timestamps_mask):
-                tokens = tokenizer.convert_ids_to_tokens(ids, skip_special_tokens=False)
-                text = tokenizer.convert_tokens_to_string(tokens)
-
                 # If we have a timestamp token, we need to check whether it's a final token or a final then the next
-                # is_single_ending_timestamp = np.array_equal(timestamps_mask[-2:], [False, True])
+                is_single_ending_timestamp = np.array_equal(timestamps_mask[-2:], [False, True])
 
-                print(text)
+                # Iterate over timestamps
+                timestamp_start, timestamp_end = 0.0, 0.0
+                slice_start = 0
 
+                for (t, position) in enumerate(np.flatnonzero(timestamps_mask)):
+                    # print(ids, position)
+                    timestamp = float(tokenizer.convert_ids_to_tokens([ids[position]])[0][2:-2])
+
+                    if t % 2 == 0:
+                        timestamp_end = timestamp
+
+                        segment_ids = ids[slice_start: position]
+                        segment_text = tokenizer.decode(segment_ids)
+                        slice_start = position
+
+                        materialized_segments.append(
+                            Segment(
+                                id=len(materialized_segments),
+                                seek=0,
+                                start=segment_timestamp_start + timestamp_start,
+                                end=segment_timestamp_start + timestamp_end,
+                                text=segment_text,
+                                tokens=segment_ids.tolist(),
+                                temperature=request.temperature,
+                                avg_logprob=0.0,
+                                compression_ratio=0.0,
+                                no_speech_prob=0.0
+                            )
+                        )
+                    else:
+                        timestamp_start = timestamp
+
+                # Not a continuation, so we set the timestamp_start from the chunk
+                if not is_single_ending_timestamp:
+                    segment_timestamp_start = idx * float(WHISPER_SEGMENT_DURATION_SEC)
+
+            # Accumulate the tokens for full decoding
+            materialized_segments_tokens_acc += generation.token_ids
+
+        text = tokenizer.decode(
+            materialized_segments_tokens_acc,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=True
+        )
+
+        return materialized_segments, text
 
     async def _handle_inference_stream(self, params: VllmGenerateParams, is_cancelled: CancelScope):
         async for step in self._engine.schedule(params):
@@ -148,7 +192,21 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
 
             if not is_cancelled.cancel_called:
                 with tracer.start_as_current_span("whisper.post_process"):
-                    await self._postprocess(segments_output)
+                    tokenizer = await self._engine._engine.get_tokenizer()
+                    segments, text = await asyncio.get_running_loop().run_in_executor(
+                        None, self._postprocess, tokenizer, segments_output, request
+                    )
+
+                    if is_verbose_output:
+                        return VerboseTranscription(
+                            text=text,
+                            duration=librosa.get_duration(y=audio, sr=sampling),
+                            language="en",
+                            segments=segments,
+                            word=None
+                        )
+                    else:
+                        return Transcription(text=text)
 
         return Transcription(text="")
 

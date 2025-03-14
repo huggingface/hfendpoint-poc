@@ -18,4 +18,4 @@ ENV GRANIAN_RUNTIME_THREADS=4
 
 EXPOSE 5000
 ENTRYPOINT ["granian", "--interface", "asgi", "--host", "0.0.0.0", "--port", "5000", "--runtime-mode", "mt"]
-CMD ["endpoint:app"]
+CMD ["transcribe:app"]

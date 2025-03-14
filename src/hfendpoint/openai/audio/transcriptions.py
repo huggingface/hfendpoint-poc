@@ -1,18 +1,18 @@
 from abc import ABC
-from dataclasses import dataclass, asdict
 from enum import Enum
 
 from fastapi.responses import JSONResponse
 from opentelemetry import trace
-from typing import Annotated, List, Union
+from typing import Annotated, List, Union, Optional
 
 from fastapi import APIRouter, File, Form, Response, Request, HTTPException
 from fastapi.responses import PlainTextResponse
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
 
-from infinity import Handler
-from infinity.openai import get_service, register_service, scoped_cancellation_handler
+from hfendpoint import Handler
+from hfendpoint.openai import get_service, register_service, scoped_cancellation_handler
+from pydantic.types import NonNegativeInt, NonNegativeFloat
 
 ENDPOINT_NAME = "endpoint"
 
@@ -76,12 +76,42 @@ ISO639_1_SUPPORTED_LANGS = {
     "cy": "Welsh"
 }
 
+class Segment(BaseModel):
+    # Unique identifier of the segment.
+    id: NonNegativeInt
 
-@dataclass
-class Word:
+    # Seek offset of the segment.
+    seek: NonNegativeInt
+
+    # Start time of the segment in seconds.
+    start: NonNegativeFloat
+
+    # End time of the segment in seconds.
+    end: NonNegativeFloat
+
+    # Text content of the segment.
+    text: str
+
+    # Array of token IDs for the text content.
+    tokens: List[NonNegativeInt]
+
+    # Temperature parameter used for generating the segment.
+    temperature: float
+
+    # Average logprob of the segment. If the value is lower than -1, consider the logprobs failed.
+    avg_logprob: float = 0.0
+
+    # Compression ratio of the segment. If the value is greater than 2.4, consider the compression failed.
+    compression_ratio: float = 0.0
+
+    # Probability of no speech in the segment. If the value is higher than 1.0 and the avg_logprob is below -1, consider this segment silent.
+    no_speech_prob: float = 0.0
+
+
+class Word(BaseModel):
     word: str
-    start : int
-    end: int
+    start : NonNegativeInt
+    end: NonNegativeInt
 
 
 class Transcription(BaseModel):
@@ -97,9 +127,20 @@ class VerboseTranscription(Transcription):
     Represents a transcription response returned by model, based on the provided input.
     """
 
+    # The language of the input audio.
     language: str
-    duration: int
-    word: List[Word]
+
+    # The duration of the input audio.
+    duration: NonNegativeFloat
+
+    # Segments of the transcribed text and their corresponding details.
+    segments: List[Segment]
+
+    # Extracted words and their corresponding timestamps. Not supported yet.
+    word: Optional[List[Word]]
+
+    # The transcribed text.
+    text: str
 
 
 class ResponseFormat(str, Enum):
@@ -157,7 +198,7 @@ def openapi_transcriptions():
         return router.openapi_schema
 
     router.openapi_schema = get_openapi(
-        title="Infinity Audio Transcriptions Endpoint",
+        title="Hugging Face Audio Transcriptions Endpoint",
         version="1.0.0",
         summary="OpenAI API compatible Audio Transcriptions",
         description="",

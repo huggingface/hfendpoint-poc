@@ -4,7 +4,7 @@ from typing import TypedDict, Union, Any
 
 from typing_extensions import AsyncGenerator
 
-from infinity import Engine
+from hfendpoint import Engine
 from vllm import AsyncEngineArgs, AsyncLLMEngine, SamplingParams, TextPrompt, TokensPrompt, RequestOutput
 from vllm.usage.usage_lib import UsageContext
 

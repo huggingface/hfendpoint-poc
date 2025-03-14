@@ -3,7 +3,7 @@ from typing import Generic, Protocol, TypeVar, runtime_checkable
 from anyio import CancelScope
 from opentelemetry.trace import Tracer
 
-from infinity.core import Engine, Handler
+from hfendpoint.core import Handler
 
 
 I = TypeVar("I")
