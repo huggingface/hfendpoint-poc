@@ -22,7 +22,7 @@ from hfendpoint.openai.audio.transcriptions import ApiRequest, ResponseFormat, T
 from librosa import load as load_audio_content
 from vllm.engine.async_llm_engine import AsyncEngineArgs
 
-
+from hfendpoint.openai.utils import compression_ratio
 
 WHISPER_SEGMENT_DURATION_SEC = 30
 WHISPER_SAMPLING_RATE = 22050
@@ -113,7 +113,7 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
                                 tokens=segment_ids.tolist(),
                                 temperature=request.temperature,
                                 avg_logprob=0.0,
-                                compression_ratio=0.0,
+                                compression_ratio=compression_ratio(segment_text),
                                 no_speech_prob=0.0
                             )
                         )
