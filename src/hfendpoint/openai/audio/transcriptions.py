@@ -1,4 +1,5 @@
 from abc import ABC
+from decimal import Decimal
 from enum import Enum
 
 from fastapi.responses import JSONResponse
@@ -12,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from hfendpoint import Handler
 from hfendpoint.openai import get_service, register_service, scoped_cancellation_handler
-from pydantic.types import NonNegativeInt, NonNegativeFloat
+from pydantic.types import FiniteFloat, NonNegativeInt, NonNegativeFloat
 
 ENDPOINT_NAME = "endpoint"
 
@@ -96,10 +97,10 @@ class Segment(BaseModel):
     tokens: List[NonNegativeInt]
 
     # Temperature parameter used for generating the segment.
-    temperature: float
+    temperature: Decimal
 
     # Average logprob of the segment. If the value is lower than -1, consider the logprobs failed.
-    avg_logprob: float = Field(default=0.0, decimal_places=2)
+    avg_logprob: FiniteFloat = Field(default=0.0, decimal_places=2)
 
     # Compression ratio of the segment. If the value is greater than 2.4, consider the compression failed.
     compression_ratio: NonNegativeFloat = Field(default=0.0, decimal_places=2)
@@ -157,7 +158,7 @@ class ApiRequest(BaseModel):
     model: str | None = None
     language: str = "en"
     prompt: str | None = None
-    temperature: float = 0.0
+    temperature: FiniteFloat = 0.0
     response_format: ResponseFormat = ResponseFormat.JSON
 
 router = APIRouter()

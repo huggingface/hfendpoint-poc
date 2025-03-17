@@ -1,7 +1,9 @@
 from abc import ABC
 from dataclasses import asdict, dataclass
+from functools import cached_property
 from typing import TypedDict, Union, Any
 
+from transformers import PreTrainedTokenizer, PretrainedConfig
 from typing_extensions import AsyncGenerator
 
 from hfendpoint import Engine
@@ -32,6 +34,13 @@ class VllmEngine(Engine[VllmGenerateParams], ABC):
             engine = engine_or_args
 
         self._engine = engine
+
+    async def config(self) -> PretrainedConfig:
+        mconfig = await self._engine.get_model_config()
+        return mconfig.hf_config
+
+    async def tokenizer(self) -> PreTrainedTokenizer:
+        return await self._engine.get_tokenizer()
 
     async def schedule(self, params: VllmGenerateParams) -> AsyncGenerator[RequestOutput]:
         async for step in self._engine.generate(**asdict(params)):

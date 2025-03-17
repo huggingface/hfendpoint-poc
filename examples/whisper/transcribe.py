@@ -1,4 +1,5 @@
 import asyncio
+import os.path
 from contextlib import asynccontextmanager
 from io import BytesIO
 from os import PathLike
@@ -10,9 +11,8 @@ from anyio import CancelScope
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
 from fastapi import FastAPI
 from opentelemetry.trace import Tracer
-from transformers import PreTrainedTokenizer
+from transformers import PreTrainedTokenizer, WhisperConfig
 from vllm import SamplingParams, RequestOutput, CompletionOutput
-from vllm.sampling_params import RequestOutputKind
 
 from hfendpoint import Endpoint
 from hfendpoint.audio import chunk_audio_with_duration
@@ -52,11 +52,13 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
         return self._handler
 
     @staticmethod
-    def with_timestamp_marker(is_verbose: bool, current: int) -> str:
-        return f"<|{f'{current}.00' if is_verbose else 'notimestamps'}|>"
+    def with_timestamp_marker(*, tokenizer: PreTrainedTokenizer, is_verbose: bool, current: int) -> int:
+        return tokenizer.convert_tokens_to_ids(f"<|{current}.00|>") if is_verbose else 50257
 
     @staticmethod
-    def create_prompt(audio, sampling_rate: int, timestamp_marker: str, request: ApiRequest) -> TypedDict:
+    def create_prompt(audio, sampling_rate: int, timestamp_marker: int, request: ApiRequest) -> TypedDict:
+        # TODO: We assume english for now
+        k_english_token = 50259
         return {
             "encoder_prompt": {
                 "prompt": "",
@@ -64,14 +66,16 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
                     "audio": (audio, sampling_rate)
                 }
             },
-            # "decoder_prompt": f"<|startoftranscript|><|{request.language}|><|transcribe|>{timestamp_marker}"
             "decoder_prompt": {
-                "prompt_token_ids": [50258, 50259, 50360, 50365]
+                # <|startoftranscript|><|{request.language}|><|transcribe|>{timestamp_marker}
+                "prompt_token_ids": [50258, k_english_token, 50360, timestamp_marker]
             }
         }
 
     def _postprocess(self, tokenizer: PreTrainedTokenizer, segments: List[RequestOutput], request: ApiRequest) -> Tuple[List[Segment], str]:
-        timestamp_token_base = tokenizer.convert_tokens_to_ids("<|0.00|>")
+        k_timestamp_token = tokenizer.convert_tokens_to_ids("<|0.00|>")
+        # k_nospeech_token = tokenizer.convert_tokens_to_ids("<|nospeech|>")
+        # k_sot_token = tokenizer.convert_tokens_to_ids("<|startoftranscript|>")
         materialized_segments, materialized_segments_tokens_acc = [], []
 
         # Iterate over segments
@@ -80,9 +84,12 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
             generation: CompletionOutput = segment.outputs[-1]
             ids: np.ndarray = np.asarray(generation.token_ids)
 
+            # Detect start of transcript token
+            # sot_mask = ids == k_sot_token
+
             # Timestamps are expected to have ids greater than token_id(<|0.00|>)
             # We create a mask for all the potential tokens which are >= token_id(<|0.00|>)
-            timestamps_mask = ids >= timestamp_token_base
+            timestamps_mask = ids >= k_timestamp_token
 
             if np.any(timestamps_mask):
                 # If we have a timestamp token, we need to check whether it's a final token or a final then the next
@@ -93,16 +100,23 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
                 slice_start = 0
 
                 for (t, position) in enumerate(np.flatnonzero(timestamps_mask)):
-                    # print(ids, position)
                     timestamp = float(tokenizer.convert_ids_to_tokens([ids[position]])[0][2:-2])
 
                     if t % 2 == 0:
                         timestamp_end = timestamp
 
+                        # Retrieve segment info
                         segment_ids = ids[slice_start: position]
                         segment_text = tokenizer.decode(segment_ids)
-                        slice_start = position
+                        segment_logprobs = generation.logprobs[slice_start: position]
 
+                        print(len(generation.logprobs[0]))
+
+                        # Compute the avg_logprob and no_speech_probs for the segment
+                        # segment_probs_at_sot = np.exp([logprobs[nospeech_token_base] for logprobs in segment_logprobs])
+                        # segment_logprobs = [segment_logprobs[token] for token in segment_ids]
+
+                        # Materialize the segment in memory
                         materialized_segments.append(
                             Segment(
                                 id=len(materialized_segments),
@@ -113,10 +127,15 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
                                 tokens=segment_ids.tolist(),
                                 temperature=request.temperature,
                                 avg_logprob=0.0,
-                                compression_ratio=compression_ratio(segment_text),
+                                compression_ratio=0.0,
+                                # compression_ratio=compression_ratio(segment_text),
                                 no_speech_prob=0.0
+                                # no_speech_prob=segment_probs_at_sot / np.sum(segment_probs_at_sot)
                             )
                         )
+
+                        # Update the start position
+                        slice_start = position
                     else:
                         timestamp_start = timestamp
 
@@ -159,10 +178,15 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
                     audio, maximum_duration_sec=WHISPER_SEGMENT_DURATION_SEC, sampling_rate=WHISPER_SAMPLING_RATE
                 )
 
+                # Retrieve model config for caching
+                tokenizer = await self._engine.tokenizer()
+                model_config: WhisperConfig = await self._engine.config()
+
                 # Submit audio pieces to the batcher and gather them all
                 for (segment_id, segment) in enumerate(segments):
                     # Compute current timestamp
                     timestamp_marker = WhisperEndpoint.with_timestamp_marker(
+                        tokenizer=tokenizer,
                         is_verbose=is_verbose_output,
                         current=segment_id * WHISPER_SEGMENT_DURATION_SEC
                     )
@@ -171,15 +195,15 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
                     prompt = WhisperEndpoint.create_prompt(segment, sampling, timestamp_marker, request)
 
                     # Submit for inference on the segment
-                    model_config = await self._engine._engine.get_model_config()
                     params = VllmGenerateParams(
                         prompt=prompt,
                         sampling_params=SamplingParams.from_optional(
                             # output_kind=RequestOutputKind.FINAL_ONLY,  # Change if streaming
-                            max_tokens=model_config.max_model_len - 4,
+                            max_tokens=model_config.max_target_positions - 4,
                             skip_special_tokens=False,
                             detokenize=False,
                             temperature=request.temperature,
+                            logprobs=is_verbose_output
                         ),
                         request_id=f"{x_request_id}-{segment_id}"
                     )
@@ -192,7 +216,6 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
 
             if not is_cancelled.cancel_called:
                 with tracer.start_as_current_span("whisper.post_process"):
-                    tokenizer = await self._engine._engine.get_tokenizer()
                     segments, text = await asyncio.get_running_loop().run_in_executor(
                         None, self._postprocess, tokenizer, segments_output, request
                     )
@@ -214,8 +237,17 @@ class WhisperEndpoint(Endpoint[ApiRequest, Union[Transcription, VerboseTranscrip
 # Move below to a wrapper CLI call? Sounds pretty generic someway
 @asynccontextmanager
 async def endpoint(app: FastAPI) -> WhisperEndpoint:
+    from os import environ as envvar
+
+    if (model_id := envvar.get("MODEL_ID")) is None:
+        raise ValueError("Unable to determine model to load")
+    else:
+        model_id = os.path.expanduser(model_id)
+
+    print(f"Loading model {model_id}")
+
     # Create the target endpoint
-    instance = WhisperEndpoint("openai/whisper-large-v3")
+    instance = WhisperEndpoint(model_id)
     app.include_router(instance.handler.router, tags=["transcriptions"])
 
     yield
