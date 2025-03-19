@@ -47,7 +47,7 @@ class AsyncEndpoint(ABC, Endpoint[I, O]):
 
         return ThreadPoolExecutor(max_workers, thread_name_prefix="hfendpoint-background-")
 
-    async def _run_in_executor(self, f: Callable, *args) -> Future:
+    async def run_in_executor(self, f: Callable, *args) -> Future:
         """
         Offload long-running computation to a background thread
         :param f: Function to call

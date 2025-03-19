@@ -181,8 +181,12 @@ async def transcription(
 
                 async with scoped_cancellation_handler(request) as has_disconnected:
                     # TODO: Better handle failure in response - Rust's Result<T, E> ?
-                    result: Union[Transcription, VerboseTranscription] = await service(params, tracer, has_disconnected)
-                    return JSONResponse(result.model_dump())
+                    result: Union[Response, Transcription, VerboseTranscription] = await service(params, tracer, has_disconnected)
+
+                    if isinstance(result, Response):
+                        return result
+                    else:
+                        return JSONResponse(result.model_dump())
 
             except Exception as e:
                 span.add_event(e)
