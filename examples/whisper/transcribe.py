@@ -196,7 +196,7 @@ class WhisperEndpoint(AsyncEndpoint[ApiRequest, Union[Transcription, VerboseTran
                 for (audio_chunk_id, audio_chunk) in enumerate(audio_chunks):
                     # Compute initial prompt for the segment
                     timestamp = audio_chunk_id * WHISPER_SEGMENT_DURATION_SEC
-                    prompt = create_prompt(tokenizer, audio_chunk, sampling, timestamp, request)
+                    prompt = create_prompt(audio_chunk, sampling, timestamp, request)
 
                     # Submit for inference on the segment
                     params = VllmGenerateParams(
