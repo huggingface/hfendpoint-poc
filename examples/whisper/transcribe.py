@@ -108,7 +108,6 @@ def process_chunks(tokenizer: PreTrainedTokenizer, chunks: List[RequestOutput], 
             segment.end += time_offset
 
             materialized_segments.append(segment)
-            print(len(materialized_segments))
 
         # Accumulate the tokens for full decoding
         materialized_segments_tokens_acc += generation.token_ids

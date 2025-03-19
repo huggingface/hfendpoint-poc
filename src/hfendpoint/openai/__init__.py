@@ -30,7 +30,6 @@ async def disconnection_handler(request: Request, has_disconnect: CancelScope):
         if message["type"] == "http.disconnect":
             break
 
-    print("disconnection_handler::cancel()")
     has_disconnect.cancel()
 
 

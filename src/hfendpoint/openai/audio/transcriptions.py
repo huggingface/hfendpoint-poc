@@ -190,7 +190,6 @@ async def transcription(
 
             except Exception as e:
                 span.add_event(e)
-                print(e)
                 raise e
 
 

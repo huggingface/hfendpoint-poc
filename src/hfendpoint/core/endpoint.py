@@ -55,3 +55,4 @@ class AsyncEndpoint(ABC, Endpoint[I, O]):
         :return:
         """
         return await self._loop.run_in_executor(self._executor, f, *args)
+
