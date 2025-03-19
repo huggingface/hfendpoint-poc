@@ -1,5 +1,4 @@
 from abc import ABC
-from decimal import Decimal
 from enum import Enum
 
 from fastapi.responses import JSONResponse
@@ -9,7 +8,7 @@ from typing import Annotated, List, Union, Optional
 from fastapi import APIRouter, File, Form, Response, Request, HTTPException
 from fastapi.responses import PlainTextResponse
 from fastapi.openapi.utils import get_openapi
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, confloat
 
 from hfendpoint import Handler
 from hfendpoint.openai import get_service, register_service, scoped_cancellation_handler
@@ -85,10 +84,10 @@ class Segment(BaseModel):
     seek: NonNegativeInt
 
     # Start time of the segment in seconds.
-    start: NonNegativeFloat = Field(decimal_places=2)
+    start: confloat(ge=0)
 
     # End time of the segment in seconds.
-    end: NonNegativeFloat = Field(decimal_places=2)
+    end: confloat(ge=0)
 
     # Text content of the segment.
     text: str
@@ -97,16 +96,18 @@ class Segment(BaseModel):
     tokens: List[NonNegativeInt]
 
     # Temperature parameter used for generating the segment.
-    temperature: Decimal
+    temperature: float
 
     # Average logprob of the segment. If the value is lower than -1, consider the logprobs failed.
-    avg_logprob: FiniteFloat = Field(default=0.0, decimal_places=2)
+    # avg_logprob: Annotated[FiniteFloat, Field(default=0.0, decimal_places=2)]
+    avg_logprob: float | None
 
     # Compression ratio of the segment. If the value is greater than 2.4, consider the compression failed.
-    compression_ratio: NonNegativeFloat = Field(default=0.0, decimal_places=2)
+    compression_ratio: confloat(ge=0)
 
     # Probability of no speech in the segment. If the value is higher than 1.0 and the avg_logprob is below -1, consider this segment silent.
-    no_speech_prob: NonNegativeFloat = Field(default=0.0, decimal_places=2)
+    # no_speech_prob: Annotated[NonNegativeFloat, Field(default=0.0, decimal_places=2)]
+    no_speech_prob: float | None
 
 
 class Word(BaseModel):
