@@ -11,7 +11,7 @@ from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, confloat
 
 from hfendpoint import Handler
-from hfendpoint.openai import get_service, register_service, scoped_cancellation_handler
+from hfendpoint.handlers.openai import get_service, register_service, scoped_cancellation_handler
 from pydantic.types import FiniteFloat, NonNegativeInt, NonNegativeFloat
 
 ENDPOINT_NAME = "endpoint"

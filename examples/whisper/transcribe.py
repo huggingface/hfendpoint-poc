@@ -11,19 +11,22 @@ import numpy as np
 from anyio import CancelScope
 from asgi_correlation_id import CorrelationIdMiddleware, correlation_id
 from fastapi import FastAPI, Response, status
+from librosa import load as load_audio_content
+from loguru import logger
 from opentelemetry.trace import Tracer
 from transformers import PreTrainedTokenizer
 from vllm import SamplingParams, RequestOutput, CompletionOutput
+from vllm.engine.async_llm_engine import AsyncEngineArgs
+from vllm.engine.metrics_types import Stats
 
 from hfendpoint.audio import chunk_audio_with_duration
 from hfendpoint.core import AsyncEndpoint
 from hfendpoint.engines.vllm import VllmEngine, VllmGenerateParams
-from hfendpoint.openai.audio.transcriptions import ApiRequest, ResponseFormat, TranscriptionHandler, Transcription, \
+from hfendpoint.handlers.monitor import EngineMonitor, with_engine_monitor_ws, MonitoringStats
+from hfendpoint.handlers.openai.audio.transcriptions import ApiRequest, ResponseFormat, TranscriptionHandler, Transcription, \
     VerboseTranscription, Segment
-from librosa import load as load_audio_content
-from vllm.engine.async_llm_engine import AsyncEngineArgs
+from hfendpoint.handlers.openai.utils import compression_ratio
 
-from hfendpoint.openai.utils import compression_ratio
 
 WHISPER_SEGMENT_DURATION_SEC = 30
 WHISPER_SAMPLING_RATE = 22050
@@ -145,17 +148,18 @@ class WhisperEndpoint(AsyncEndpoint[ApiRequest, Union[Transcription, VerboseTran
 
     __slots__ = ("_engine", "_handler")
 
-    def __init__(self, model: Union[str, PathLike]):
+    def __init__(self, model: Union[str, PathLike], monitor: EngineMonitor):
         super().__init__()
 
         self._engine = VllmEngine(AsyncEngineArgs(
             model,
+            task="transcription",
             device="auto",
-            enforce_eager=True,
             dtype="bfloat16",
             kv_cache_dtype="fp8",
+            enforce_eager=True,
             enable_prefix_caching=True,
-        ))
+        ), monitor)
 
         self._handler = TranscriptionHandler(self)
 
@@ -180,62 +184,65 @@ class WhisperEndpoint(AsyncEndpoint[ApiRequest, Union[Transcription, VerboseTran
             x_request_id = correlation_id.get()
             is_verbose_output = request.response_format == ResponseFormat.VERBOSE_JSON
 
-            # Start inference
-            chunks_handle = []
-            with tracer.start_as_current_span("whisper.infer"):
-                # Chunk audio in pieces
-                audio_chunks = chunk_audio_with_duration(
-                    audio, maximum_duration_sec=WHISPER_SEGMENT_DURATION_SEC, sampling_rate=WHISPER_SAMPLING_RATE
-                )
+            with logger.contextualize(request_id=x_request_id):
+                logger.debug("Received {} seconds audio", librosa.get_duration(y=audio, sr=sampling))
 
-                # Retrieve model config for caching
-                tokenizer = await self._engine.tokenizer()
-                model_config = await self._engine.config()
-
-                # Submit audio pieces to the batcher and gather them all
-                for (audio_chunk_id, audio_chunk) in enumerate(audio_chunks):
-                    # Compute initial prompt for the segment
-                    timestamp = audio_chunk_id * WHISPER_SEGMENT_DURATION_SEC
-                    prompt = create_prompt(audio_chunk, sampling, timestamp, request)
-
-                    # Submit for inference on the segment
-                    params = VllmGenerateParams(
-                        prompt=prompt,
-                        sampling_params=SamplingParams.from_optional(
-                            # output_kind=RequestOutputKind.FINAL_ONLY,  # Change if streaming
-                            max_tokens=model_config.max_target_positions - 4,
-                            skip_special_tokens=False,
-                            detokenize=False,
-                            temperature=request.temperature,
-                            logprobs=is_verbose_output,
-
-                        ),
-                        request_id=f"{x_request_id}-{audio_chunk_id}"
+                # Start inference
+                chunks_handle = []
+                with tracer.start_as_current_span("whisper.infer"):
+                    # Chunk audio in pieces
+                    audio_chunks = chunk_audio_with_duration(
+                        audio, maximum_duration_sec=WHISPER_SEGMENT_DURATION_SEC, sampling_rate=WHISPER_SAMPLING_RATE
                     )
 
-                    # Keep track of the background task
-                    chunks_handle += [self._handle_inference_stream(params, is_cancelled)]
+                    # Retrieve model config for caching
+                    tokenizer = await self._engine.tokenizer()
+                    model_config = await self._engine.config()
 
-                # Wait for all the segment to complete
-                text_chunks = await asyncio.gather(*chunks_handle)
+                    # Submit audio pieces to the batcher and gather them all
+                    for (audio_chunk_id, audio_chunk) in enumerate(audio_chunks):
+                        # Compute initial prompt for the segment
+                        timestamp = audio_chunk_id * WHISPER_SEGMENT_DURATION_SEC
+                        prompt = create_prompt(audio_chunk, sampling, timestamp, request)
 
-            if not is_cancelled.cancel_called:
-                with tracer.start_as_current_span("whisper.post_process"):
+                        # Submit for inference on the segment
+                        params = VllmGenerateParams(
+                            prompt=prompt,
+                            sampling_params=SamplingParams.from_optional(
+                                # output_kind=RequestOutputKind.FINAL_ONLY,  # Change if streaming
+                                max_tokens=model_config.max_target_positions - 4,
+                                skip_special_tokens=False,
+                                detokenize=False,
+                                temperature=request.temperature,
+                                logprobs=is_verbose_output,
 
-                    segments, text = await self.run_in_executor(process_chunks, tokenizer, text_chunks, request)
-
-                    if is_verbose_output:
-                        return VerboseTranscription(
-                            text=text,
-                            duration=librosa.get_duration(y=audio, sr=sampling),
-                            language="en",
-                            segments=segments,
-                            word=None
+                            ),
+                            request_id=f"{x_request_id}-{audio_chunk_id}"
                         )
-                    else:
-                        return Transcription(text=text)
 
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+                        # Keep track of the background task
+                        chunks_handle += [self._handle_inference_stream(params, is_cancelled)]
+
+                    # Wait for all the segment to complete
+                    text_chunks = await asyncio.gather(*chunks_handle)
+
+                if not is_cancelled.cancel_called:
+                    with tracer.start_as_current_span("whisper.post_process"):
+
+                        segments, text = await self.run_in_executor(process_chunks, tokenizer, text_chunks, request)
+
+                        if is_verbose_output:
+                            return VerboseTranscription(
+                                text=text,
+                                duration=librosa.get_duration(y=audio, sr=sampling),
+                                language="en",
+                                segments=segments,
+                                word=None
+                            )
+                        else:
+                            return Transcription(text=text)
+
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # Move below to a wrapper CLI call? Sounds pretty generic someway
@@ -251,9 +258,10 @@ async def endpoint(app: FastAPI) -> WhisperEndpoint:
     print(f"Loading model {model_id}")
 
     # Create the target endpoint
-    instance = WhisperEndpoint(model_id)
+    monitor = EngineMonitor()
+    instance = WhisperEndpoint(model_id, monitor)
+    app.include_router(with_engine_monitor_ws(monitor))
     app.include_router(instance.handler.router, tags=["openai", "transcriptions"])
-    # app.include_router(instance., tags=["hfendpoint", "hpa"])
 
     yield
 
